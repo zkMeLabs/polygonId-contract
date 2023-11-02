@@ -3,22 +3,22 @@ pragma solidity 0.8.16;
 
 import {IOnchainCredentialStatusResolver} from "../interfaces/IOnchainCredentialStatusResolver.sol";
 import {IState} from "../interfaces/IState.sol";
-import {IdentityLib} from "../lib/IdentityLib.sol";
+import {OnChainIdentity} from "../lib/OnChainIdentity.sol";
 import {SmtLib} from "../lib/SmtLib.sol";
 
 // /**
 //  * @dev Contract managing onchain identity
 //  */
-abstract contract IdentityBase is IOnchainCredentialStatusResolver {
+contract IdentityBase is IOnchainCredentialStatusResolver {
     // This empty reserved space is put in place to allow future versions
     // of this contract to add new parent contracts without shifting down
     // storage of child contracts that use this contract as a base
     // (see https://docs.openzeppelin.com/upgrades-plugins/1.x/writing-upgradeable#storage-gaps)
     uint256[500] private __gapBefore;
 
-    using IdentityLib for IdentityLib.Data;
+    using OnChainIdentity for OnChainIdentity.Identity;
 
-    IdentityLib.Data internal identity;
+    OnChainIdentity.Identity internal identity;
 
     // This empty reserved space is put in place to allow future versions
     // of this contract to add new variables without shifting down
@@ -35,7 +35,7 @@ abstract contract IdentityBase is IOnchainCredentialStatusResolver {
     }
 
     /**
-     * @dev Initialization of IdentityLib library
+     * @dev Initialization of OnChainIdentity library
      * @param _stateContractAddr - address of the State contract
      */
     function initialize(address _stateContractAddr) public virtual {
@@ -77,7 +77,7 @@ abstract contract IdentityBase is IOnchainCredentialStatusResolver {
     /**
      * @dev Retrieve inclusion or non-inclusion proof for a given revocation nonce.
      * @param revocationNonce - revocation nonce
-     * @return The RevocationsTree inclusion or non-inclusion proof for the revocation nonce
+     * @return The RevocationsTree inclusion or non-inclusion proof for the claim
      */
     function getRevocationProof(
         uint64 revocationNonce
@@ -89,7 +89,7 @@ abstract contract IdentityBase is IOnchainCredentialStatusResolver {
      * @dev Retrieve inclusion or non-inclusion proof for a given revocation nonce by target root.
      * @param revocationNonce - revocation nonce
      * @param root - root of the tree
-     * @return The RevocationsTree inclusion or non-inclusion proof for the revocation nonce
+     * @return The RevocationsTree inclusion or non-inclusion proof for the claim
      */
     function getRevocationProofByRoot(
         uint64 revocationNonce,
@@ -109,7 +109,7 @@ abstract contract IdentityBase is IOnchainCredentialStatusResolver {
     /**
      * @dev Retrieve inclusion or non-inclusion proof for a given claimsTreeRoot.
      * @param claimsTreeRoot - claims tree root
-     * @return The RootsTree inclusion or non-inclusion proof for the claim tree root
+     * @return The RevocationsTree inclusion or non-inclusion proof for the claim
      */
     function getRootProof(
         uint256 claimsTreeRoot
@@ -121,7 +121,7 @@ abstract contract IdentityBase is IOnchainCredentialStatusResolver {
      * @dev Retrieve inclusion or non-inclusion proof for a given claimsTreeRoot by target root.
      * @param claimsTreeRoot - claims tree root
      * @param root - root of the tree
-     * @return The RootsTree inclusion or non-inclusion proof for the claim tree root
+     * @return The RevocationsTree inclusion or non-inclusion proof for the claim
      */
     function getRootProofByRoot(
         uint256 claimsTreeRoot,
@@ -144,7 +144,9 @@ abstract contract IdentityBase is IOnchainCredentialStatusResolver {
      * @param state identity state
      * @return set of roots
      */
-    function getRootsByState(uint256 state) public view virtual returns (IdentityLib.Roots memory) {
+    function getRootsByState(
+        uint256 state
+    ) public view virtual returns (OnChainIdentity.Roots memory) {
         return identity.getRootsByState(state);
     }
 
@@ -165,35 +167,35 @@ abstract contract IdentityBase is IOnchainCredentialStatusResolver {
     }
 
     /**
-     * @dev returns latest published claims tree root
+     * @dev returns last claims root
      * @return claimsRoot
      */
-    function getLatestPublishedClaimsRoot() public view returns (uint256) {
-        return identity.latestPublishedTreeRoots.claimsRoot;
+    function getLastClaimsRoot() public view returns (uint256) {
+        return identity.lastTreeRoots.claimsRoot;
     }
 
     /**
-     * @dev returns latest published revocation tree root
-     * @return revocationsRoot
+     * @dev returns last revocation root
+     * @return claimsRoot
      */
-    function getLatestPublishedRevocationsRoot() public view returns (uint256) {
-        return identity.latestPublishedTreeRoots.revocationsRoot;
+    function getLastRevocationsRoot() public view returns (uint256) {
+        return identity.lastTreeRoots.revocationsRoot;
     }
 
     /**
-     * @dev returns latest published roots tree root
+     * @dev returns last roots root
      * @return rootsRoot
      */
-    function getLatestPublishedRootsRoot() public view returns (uint256) {
-        return identity.latestPublishedTreeRoots.rootsRoot;
+    function getLastRootsRoot() public view returns (uint256) {
+        return identity.lastTreeRoots.rootsRoot;
     }
 
     /**
      * @dev returns identity latest state
      * @return uint256 identityLatestState
      */
-    function getLatestPublishedState() public view returns (uint256) {
-        return identity.latestPublishedState;
+    function getIdentityLatestState() public view returns (uint256) {
+        return identity.latestState;
     }
 
     /**
@@ -206,26 +208,11 @@ abstract contract IdentityBase is IOnchainCredentialStatusResolver {
         uint256 id,
         uint64 nonce
     ) public view returns (CredentialStatus memory) {
-        uint256 latestState = identity.latestPublishedState;
-        return getRevocationStatusByIdAndState(id, latestState, nonce);
-    }
-
-    /**
-     * @dev returns revocation status of a claim using given revocation nonce, id and state
-     * @param id Issuer's identifier
-     * @param state of the Issuer
-     * @param nonce Revocation nonce
-     * @return CredentialStatus
-     */
-    function getRevocationStatusByIdAndState(
-        uint256 id,
-        uint256 state,
-        uint64 nonce
-    ) public view returns (CredentialStatus memory) {
         require(id == identity.id, "Identity id mismatch");
-        IdentityLib.Roots memory historicalStates = identity.getRootsByState(state);
+        uint256 latestState = identity.latestState;
+        OnChainIdentity.Roots memory historicalStates = identity.getRootsByState(latestState);
         IdentityStateRoots memory issuerStates = IdentityStateRoots({
-            state: state,
+            state: latestState,
             rootOfRoots: historicalStates.rootsRoot,
             claimsTreeRoot: historicalStates.claimsRoot,
             revocationTreeRoot: historicalStates.revocationsRoot

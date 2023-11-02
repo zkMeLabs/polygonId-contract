@@ -42,11 +42,11 @@ export class OnchainIdentityDeployHelper {
     const IdentityFactory = await ethers.getContractFactory("IdentityExample", {
       libraries: {
         ClaimBuilder: cb.address,
-        IdentityLib: il.address,
+        OnChainIdentity: il.address,
       },
     });
     // const IdentityFactory = await ethers.getContractFactory("Identity");
-    const Identity = await upgrades.deployProxy(IdentityFactory, [state.address], {
+    const Identity = await upgrades.deployProxy(IdentityFactory, ["0x134B1BE34911E39A8397ec6289782989729807a4"], {
       unsafeAllowLinkedLibraries: true,
     });
     await Identity.deployed();
@@ -69,7 +69,7 @@ export class OnchainIdentityDeployHelper {
   }
 
   async deployIdentityLib(smtpAddress: string, poseidonUtil3lAddress: string, poseidonUtil4lAddress: string): Promise<Contract> {
-    const Identity = await ethers.getContractFactory("IdentityLib", { libraries: {
+    const Identity = await ethers.getContractFactory("OnChainIdentity", { libraries: {
       SmtLib: smtpAddress,
       PoseidonUnit3L: poseidonUtil3lAddress,
       PoseidonUnit4L: poseidonUtil4lAddress,
@@ -80,13 +80,13 @@ export class OnchainIdentityDeployHelper {
 
     return il;
   }
-
+  
   async deployClaimBuilderWrapper(): Promise<{
     address: string;
   }> {
-
+  
     const cb = await this.deployClaimBuilder();
-
+  
     const ClaimBuilderWrapper = await ethers.getContractFactory("ClaimBuilderWrapper", {
       libraries: {
         ClaimBuilder: cb.address

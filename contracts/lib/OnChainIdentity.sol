@@ -9,13 +9,13 @@ import {GenesisUtils} from "../lib/GenesisUtils.sol";
 // /**
 //  * @dev Contract managing onchain identity
 //  */
-library IdentityLib {
+library OnChainIdentity {
     using SmtLib for SmtLib.Data;
 
     uint256 public constant IDENTITY_MAX_SMT_DEPTH = 40;
 
     /**
-     * @dev Data
+     * @dev Identity
      * Id
      * Identity latest state
      * Is old state genesis flag
@@ -24,14 +24,14 @@ library IdentityLib {
      * Trees
      * Last tree roots
      */
-    struct Data {
+    struct Identity {
         uint256 id;
-        uint256 latestPublishedState;
+        uint256 latestState;
         bool isOldStateGenesis;
         IState stateContract;
         mapping(uint256 => Roots) rootsByState;
         Trees trees;
-        Roots latestPublishedTreeRoots;
+        Roots lastTreeRoots;
         // This empty reserved space is put in place to allow future versions
         // of the SMT library to add new Data struct fields without shifting down
         // storage of upgradable contracts that use this struct as a state variable
@@ -64,7 +64,7 @@ library IdentityLib {
      * @param depth - depth of identity SMTs
      */
     function initialize(
-        Data storage self,
+        Identity storage self,
         address _stateContractAddr,
         address _identityAddr,
         uint256 depth
@@ -77,7 +77,7 @@ library IdentityLib {
         self.trees.revocationsTree.initialize(depth);
         self.trees.rootsTree.initialize(depth);
 
-        self.id = GenesisUtils.calcIdFromEthAddress(
+        self.id = GenesisUtils.calcOnchainIdFromAddress(
             self.stateContract.getDefaultIdType(),
             _identityAddr
         );
@@ -87,7 +87,7 @@ library IdentityLib {
      * @dev Add claim
      * @param claim - claim data
      */
-    function addClaim(Data storage self, uint256[8] calldata claim) external {
+    function addClaim(Identity storage self, uint256[8] calldata claim) external {
         uint256[4] memory claimIndex;
         uint256[4] memory claimValue;
         for (uint8 i = 0; i < 4; i++) {
@@ -104,7 +104,7 @@ library IdentityLib {
      * @param hashIndex - hash of claim index part
      * @param hashValue - hash of claim value part
      */
-    function addClaimHash(Data storage self, uint256 hashIndex, uint256 hashValue) external {
+    function addClaimHash(Identity storage self, uint256 hashIndex, uint256 hashValue) external {
         self.trees.claimsTree.addLeaf(hashIndex, hashValue);
     }
 
@@ -112,40 +112,47 @@ library IdentityLib {
      * @dev Revoke claim using it's revocationNonce
      * @param revocationNonce - revocation nonce
      */
-    function revokeClaim(Data storage self, uint64 revocationNonce) external {
+    function revokeClaim(Identity storage self, uint64 revocationNonce) external {
         self.trees.revocationsTree.addLeaf(uint256(revocationNonce), 0);
     }
 
     /**
      * @dev Make state transition
      */
-    function transitState(Data storage self) external {
-        uint256 oldIdentityState = self.latestPublishedState;
+    function transitState(Identity storage self) external {
         uint256 currentClaimsTreeRoot = self.trees.claimsTree.getRoot();
         uint256 currentRevocationsTreeRoot = self.trees.revocationsTree.getRoot();
         uint256 currentRootsTreeRoot = self.trees.rootsTree.getRoot();
 
         require(
-            (self.latestPublishedTreeRoots.claimsRoot != currentClaimsTreeRoot) ||
-                (self.latestPublishedTreeRoots.revocationsRoot != currentRevocationsTreeRoot) ||
-                (self.latestPublishedTreeRoots.rootsRoot != currentRootsTreeRoot),
+            (self.lastTreeRoots.claimsRoot != currentClaimsTreeRoot) ||
+                (self.lastTreeRoots.revocationsRoot != currentRevocationsTreeRoot) ||
+                (self.lastTreeRoots.rootsRoot != currentRootsTreeRoot),
             "Identity trees haven't changed"
         );
 
         // if claimsTreeRoot changed, then add it to rootsTree
-        if (self.latestPublishedTreeRoots.claimsRoot != currentClaimsTreeRoot) {
+        if (self.lastTreeRoots.claimsRoot != currentClaimsTreeRoot) {
             self.trees.rootsTree.addLeaf(currentClaimsTreeRoot, 0);
         }
 
         uint256 newIdentityState = calcIdentityState(self);
 
-        // update internal state vars
-        self.latestPublishedState = newIdentityState;
-        self.latestPublishedTreeRoots.claimsRoot = currentClaimsTreeRoot;
-        self.latestPublishedTreeRoots.revocationsRoot = currentRevocationsTreeRoot;
-        self.latestPublishedTreeRoots.rootsRoot = self.trees.rootsTree.getRoot();
+        // do state transition in State Contract
+        self.stateContract.transitStateGeneric(
+            self.id,
+            self.latestState,
+            newIdentityState,
+            self.isOldStateGenesis,
+            1, // state transition method id: 1 - using ethereum auth
+            new bytes(0) // empty method params
+        );
 
-        bool isOldStateGenesis = self.isOldStateGenesis;
+        // update internal state vars
+        self.latestState = newIdentityState;
+        self.lastTreeRoots.claimsRoot = currentClaimsTreeRoot;
+        self.lastTreeRoots.revocationsRoot = currentRevocationsTreeRoot;
+        self.lastTreeRoots.rootsRoot = self.trees.rootsTree.getRoot();
         // it may have changed since we've got currentRootsTreeRoot
         // related to the documentation set isOldStateGenesis to false each time is faster and cheaper
         // https://docs.google.com/spreadsheets/d/1m89CVujrQe5LAFJ8-YAUCcNK950dUzMQPMJBxRtGCqs/edit#gid=0
@@ -153,22 +160,12 @@ library IdentityLib {
 
         writeHistory(
             self,
-            self.latestPublishedState,
+            self.latestState,
             Roots({
-                claimsRoot: self.latestPublishedTreeRoots.claimsRoot,
-                revocationsRoot: self.latestPublishedTreeRoots.revocationsRoot,
-                rootsRoot: self.latestPublishedTreeRoots.rootsRoot
+                claimsRoot: self.lastTreeRoots.claimsRoot,
+                revocationsRoot: self.lastTreeRoots.revocationsRoot,
+                rootsRoot: self.lastTreeRoots.rootsRoot
             })
-        );
-
-        // do state transition in State Contract
-        self.stateContract.transitStateGeneric(
-            self.id,
-            oldIdentityState,
-            newIdentityState,
-            isOldStateGenesis,
-            1, // state transition method id: 1 - using ethereum auth
-            new bytes(0) // empty method params
         );
     }
 
@@ -176,7 +173,7 @@ library IdentityLib {
      * @dev Calculate IdentityState
      * @return IdentityState
      */
-    function calcIdentityState(Data storage self) public view returns (uint256) {
+    function calcIdentityState(Identity storage self) public view returns (uint256) {
         return
             PoseidonUnit3L.poseidon(
                 [
@@ -189,19 +186,14 @@ library IdentityLib {
 
     /**
      * @dev Retrieve Claim inclusion or non-inclusion proof for a given claim index.
-     * Note that proof is taken for the latest published claims tree root.
      * @param claimIndexHash - hash of Claim Index
      * @return The ClaimsTree inclusion or non-inclusion proof for the claim
      */
     function getClaimProof(
-        Data storage self,
+        Identity storage self,
         uint256 claimIndexHash
     ) external view returns (SmtLib.Proof memory) {
-        return
-            self.trees.claimsTree.getProofByRoot(
-                claimIndexHash,
-                self.latestPublishedTreeRoots.claimsRoot
-            );
+        return self.trees.claimsTree.getProof(claimIndexHash);
     }
 
     /**
@@ -211,7 +203,7 @@ library IdentityLib {
      * @return The ClaimsTree inclusion or non-inclusion proof for the claim
      */
     function getClaimProofByRoot(
-        Data storage self,
+        Identity storage self,
         uint256 claimIndexHash,
         uint256 root
     ) external view returns (SmtLib.Proof memory) {
@@ -222,25 +214,20 @@ library IdentityLib {
      * @dev Retrieve ClaimsTree latest root.
      * @return The latest ClaimsTree root
      */
-    function getClaimsTreeRoot(Data storage self) external view returns (uint256) {
+    function getClaimsTreeRoot(Identity storage self) external view returns (uint256) {
         return self.trees.claimsTree.getRoot();
     }
 
     /**
      * @dev Retrieve inclusion or non-inclusion proof for a given revocation nonce.
-     Note that proof is taken for the latest published revocation tree root.
      * @param revocationNonce - revocation nonce
      * @return The RevocationsTree inclusion or non-inclusion proof for the claim
      */
     function getRevocationProof(
-        Data storage self,
+        Identity storage self,
         uint64 revocationNonce
     ) external view returns (SmtLib.Proof memory) {
-        return
-            self.trees.revocationsTree.getProofByRoot(
-                uint256(revocationNonce),
-                self.latestPublishedTreeRoots.revocationsRoot
-            );
+        return self.trees.revocationsTree.getProof(uint256(revocationNonce));
     }
 
     /**
@@ -250,7 +237,7 @@ library IdentityLib {
      * @return The RevocationsTree inclusion or non-inclusion proof for the claim
      */
     function getRevocationProofByRoot(
-        Data storage self,
+        Identity storage self,
         uint64 revocationNonce,
         uint256 root
     ) external view returns (SmtLib.Proof memory) {
@@ -261,35 +248,30 @@ library IdentityLib {
      * @dev Retrieve RevocationsTree latest root.
      * @return The latest RevocationsTree root
      */
-    function getRevocationsTreeRoot(Data storage self) external view returns (uint256) {
+    function getRevocationsTreeRoot(Identity storage self) external view returns (uint256) {
         return self.trees.revocationsTree.getRoot();
     }
 
     /**
      * @dev Retrieve inclusion or non-inclusion proof for a given claimsTreeRoot.
-     Note that proof is taken for the latest published roots tree root.
      * @param claimsTreeRoot - claims tree root
-     * @return The RootsTree inclusion or non-inclusion proof for the claim tree root
+     * @return The RevocationsTree inclusion or non-inclusion proof for the claim
      */
     function getRootProof(
-        Data storage self,
+        Identity storage self,
         uint256 claimsTreeRoot
     ) external view returns (SmtLib.Proof memory) {
-        return
-            self.trees.rootsTree.getProofByRoot(
-                claimsTreeRoot,
-                self.latestPublishedTreeRoots.rootsRoot
-            );
+        return self.trees.rootsTree.getProof(claimsTreeRoot);
     }
 
     /**
      * @dev Retrieve inclusion or non-inclusion proof for a given claimsTreeRoot by target root.
      * @param claimsTreeRoot - claims tree root
      * @param root - root of the tree
-     * @return The RootsTree inclusion or non-inclusion proof for the claim tree root
+     * @return The RevocationsTree inclusion or non-inclusion proof for the claim
      */
     function getRootProofByRoot(
-        Data storage self,
+        Identity storage self,
         uint256 claimsTreeRoot,
         uint256 root
     ) external view returns (SmtLib.Proof memory) {
@@ -300,7 +282,7 @@ library IdentityLib {
      * @dev Retrieve RootsTree latest root.
      * @return The latest RootsTree root
      */
-    function getRootsTreeRoot(Data storage self) external view returns (uint256) {
+    function getRootsTreeRoot(Identity storage self) external view returns (uint256) {
         return self.trees.rootsTree.getRoot();
     }
 
@@ -310,7 +292,7 @@ library IdentityLib {
      * @param state identity state
      * @param roots set of roots
      */
-    function writeHistory(Data storage self, uint256 state, Roots memory roots) internal {
+    function writeHistory(Identity storage self, uint256 state, Roots memory roots) internal {
         require(
             self.rootsByState[state].claimsRoot == 0 &&
                 self.rootsByState[state].revocationsRoot == 0 &&
@@ -327,7 +309,7 @@ library IdentityLib {
      * @return set of roots
      */
     function getRootsByState(
-        Data storage self,
+        Identity storage self,
         uint256 state
     ) external view returns (Roots memory) {
         require(

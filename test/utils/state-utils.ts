@@ -99,15 +99,15 @@ export async function publishState(
 export async function publishStateWithStubProof(
   state: Contract,
   params: {
-    id: string | number | bigint;
-    oldState: string | number | bigint;
-    newState: string | number | bigint;
+    id: string | number;
+    oldState: string | number;
+    newState: string | number;
     isOldStateGenesis: boolean;
   }
 ): Promise<{
-  id: string | number | bigint;
-  oldState: string | number | bigint;
-  newState: string | number | bigint;
+  id: string | number;
+  oldState: string | number;
+  newState: string | number;
   blockNumber: number;
   timestamp: number;
 }> {

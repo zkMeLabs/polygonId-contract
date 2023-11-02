@@ -1,11 +1,8 @@
-import { ethers, network, upgrades } from "hardhat";
+import { ethers, upgrades, network } from "hardhat";
 import { Contract } from "ethers";
 import { SignerWithAddress } from "@nomiclabs/hardhat-ethers/signers";
 import { deployPoseidons } from "./PoseidonDeployHelper";
 import { chainIdDefaultIdTypeMap } from "./ChainIdDefTypeMap";
-import { GenesisUtilsWrapper } from "../typechain";
-import {BigNumber} from "@ethersproject/bignumber";
-
 
 const SMT_MAX_DEPTH = 64;
 
@@ -13,8 +10,7 @@ export class DeployHelper {
   constructor(
     private signers: SignerWithAddress[],
     private readonly enableLogging: boolean = false
-  ) {
-  }
+  ) {}
 
   static async initialize(
     signers: SignerWithAddress[] | null = null,
@@ -30,7 +26,7 @@ export class DeployHelper {
   }
 
   async deployState(
-    verifierContractName = "VerifierStateTransition"
+    verifierContractName = "Verifier"
   ): Promise<{
     state: Contract;
     verifier: Contract;
@@ -99,7 +95,7 @@ export class DeployHelper {
 
   async upgradeState(
     stateAddress: string,
-    verifierContractName = "VerifierStateTransition",
+    verifierContractName = "Verifier",
     stateContractName = "State"
   ): Promise<{
     state: Contract;
@@ -136,17 +132,7 @@ export class DeployHelper {
     const stateLib = await this.deployStateLib();
 
     this.log("upgrading state...");
-
-    /*
-
-    // in case you need to redefine priority fee config for upgrade operation
-
-    const feedata = await owner.provider!.getFeeData();
-    feedata.maxPriorityFeePerGas = BigNumber.from("100000000000");
-    owner.provider!.getFeeData = async () => (feedata);
-   */
     const StateFactory = await ethers.getContractFactory(stateContractName, {
-      signer: owner,
       libraries: {
         StateLib: stateLib.address,
         SmtLib: smtLib.address,
@@ -155,7 +141,7 @@ export class DeployHelper {
     });
     const state = await upgrades.upgradeProxy(stateAddress, StateFactory, {
       unsafeAllowLinkedLibraries: true,
-      unsafeSkipStorageCheck: true, // TODO: remove for next upgrade
+      unsafeSkipStorageCheck: true,
     });
     await state.deployed();
     this.log(`State contract upgraded at address ${state.address} from ${owner.address}`);
@@ -296,7 +282,9 @@ export class DeployHelper {
     const ValidatorContract = await ethers.getContractFactory(validatorContractName);
 
     const validatorContractProxy = await upgrades.deployProxy(ValidatorContract, [
-      validatorContractVerifierWrapper.address, stateAddress]);
+      validatorContractVerifierWrapper.address,
+      stateAddress,
+    ]);
 
     await validatorContractProxy.deployed();
     console.log(`${validatorContractName} deployed to: ${validatorContractProxy.address}`);
@@ -309,77 +297,25 @@ export class DeployHelper {
       state,
     };
   }
-
-  async upgradeValidator(
-    validatorAddress: string,
-    validatorContractName: string,
-  ): Promise<{
-    validator: Contract;
+  async deployGenesisUtilsWrapper(): Promise<{
+    address: string;
   }> {
-    this.log("======== Validator: upgrade started ========");
 
-    const owner = this.signers[0];
-
-    this.log("upgrading validator...");
-    const ValidatorFactory = await ethers.getContractFactory(validatorContractName);
-    const validator = await upgrades.upgradeProxy(validatorAddress, ValidatorFactory);
-    await validator.deployed();
-    this.log(`Validator ${validatorContractName} upgraded at address ${validator.address} from ${owner.address}`);
-
-    this.log("======== Validator: upgrade completed ========");
-    return {
-      validator: validator
-    };
-  }
-
-  async deployGenesisUtilsWrapper(): Promise<GenesisUtilsWrapper> {
     const GenesisUtilsWrapper = await ethers.getContractFactory(
-      "GenesisUtilsWrapper"
+        "GenesisUtilsWrapper"
     );
     const genesisUtilsWrapper = await GenesisUtilsWrapper.deploy();
     console.log("GenesisUtilsWrapper deployed to:", genesisUtilsWrapper.address);
     return genesisUtilsWrapper;
   }
 
-  async deployZKPVerifier(): Promise<{
-    address: string;
-  }> {
-    const ZKPVerifier = await ethers.getContractFactory(
-      "ZKPVerifier"
-    );
-    const zkpVerifier = await ZKPVerifier.deploy();
-    console.log("ZKPVerifier deployed to:", zkpVerifier.address);
-    return zkpVerifier;
-  }
-
-  async getDefaultIdType(): Promise<{ defaultIdType: number, chainId: number }> {
+  async getDefaultIdType(): Promise<{defaultIdType: number, chainId: number}> {
     const chainId = parseInt(await network.provider.send('eth_chainId'), 16);
     const defaultIdType = chainIdDefaultIdTypeMap.get(chainId);
     if (!defaultIdType) {
       throw new Error(`Failed to find defaultIdType in Map for chainId ${chainId}`);
     }
     return { defaultIdType, chainId };
-  }
-
-  async deployIdentityTreeStore(stateContractAddress: string): Promise<{
-    identityTreeStore: Contract;
-  }> {
-    const owner = this.signers[0];
-    const [poseidon2Elements, poseidon3Elements] = await deployPoseidons(owner, [2, 3]);
-
-    const IdentityTreeStore = await ethers.getContractFactory("IdentityTreeStore", {
-      libraries: {
-        PoseidonUnit2L: poseidon2Elements.address,
-        PoseidonUnit3L: poseidon3Elements.address,
-      },
-    });
-    const identityTreeStore = await IdentityTreeStore.deploy(stateContractAddress);
-    await identityTreeStore.deployed();
-
-    console.log("\nIdentityTreeStore deployed to:", identityTreeStore.address);
-    return {
-      identityTreeStore,
-    };
   }
 
   private log(...args): void {

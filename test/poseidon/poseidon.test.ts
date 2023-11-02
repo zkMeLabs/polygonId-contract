@@ -6,8 +6,7 @@ describe("poseidon", () => {
   let poseidonFacade: Contract;
 
   before(async () => {
-    let poseidonContracts = await deployPoseidonFacade();
-    poseidonFacade = poseidonContracts.PoseidonFacade;
+    poseidonFacade = await deployPoseidonFacade();
   });
 
   it("check poseidon hash function with inputs [1, 2]", async () => {

@@ -7,7 +7,7 @@ import "solidity-coverage";
 import "@openzeppelin/hardhat-upgrades";
 
 const DEFAULT_MNEMONIC =
-  "test test test test test test test test test test test junk";
+  "";
 
 // This is a sample Hardhat task. To learn how to create your own go to
 // https://hardhat.org/guides/create-task.html
@@ -34,16 +34,16 @@ const config: HardhatUserConfig = {
     ],
   },
   networks: {
-    // main: {
-    //   chainId: 137,
-    //   url: `${process.env.MAIN_RPC_URL}`,
-    //   accounts: [`0x${process.env.MAIN_PRIVATE_KEY}`],
+    // ropsten: {
+    //     chainId: 3,
+    //     url: "https://ropsten.infura.io/v3/{infuraID}",
+    //     accounts: [<private key here>],
     // },
-    // mumbai: {
-    //   chainId: 80001,
-    //   url: `${process.env.MUMBAI_RPC_URL}`,
-    //   accounts: [`0x${process.env.MUMBAI_PRIVATE_KEY}`],
-    // },
+    mumbai: {
+      chainId: 80001,
+      url: "",
+      accounts: [""],
+    },
     localhost: {
       url: "http://127.0.0.1:8545",
       accounts: {
